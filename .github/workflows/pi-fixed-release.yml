@@ -1,0 +1,58 @@
+# Builds pi binaries from the pi-fixed branch and publishes them as the fork's latest release.
+# install-pi-fixed.ps1 and install-pi-fixed.sh download from that release.
+name: pi-fixed release
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pi-fixed-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Hydrate model data
+        run: npm run hydrate:model-data
+
+      - name: Build binaries
+        run: ./scripts/build-binaries.sh --offline-model-data
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # No "v" prefix: upstream workflows build and publish on v* tags.
+          version="$(node -p "require('./packages/coding-agent/package.json').version")"
+          tag="pi-fixed-${version}-${GITHUB_RUN_NUMBER}"
+          cd packages/coding-agent/binaries
+          gh release create "${tag}" \
+            pi-windows-x64.zip pi-windows-arm64.zip \
+            pi-linux-x64.tar.gz pi-linux-arm64.tar.gz \
+            pi-darwin-x64.tar.gz pi-darwin-arm64.tar.gz \
+            --target "${GITHUB_SHA}" \
+            --title "pi-fixed ${version} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "pi ${version} with the fixes from the pi-fixed branch, built from ${GITHUB_SHA}." \
+            --latest
