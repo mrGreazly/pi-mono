@@ -194,6 +194,42 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		}
 	});
 
+	// #6973: Windows ConPTY forwards the push but answers DA itself and drops the Kitty reply.
+	it("pops the requested Kitty flags when device attributes arrive without Kitty flags", () => {
+		const harness = setupNegotiation();
+		try {
+			harness.send("\x1b[?1;0c");
+
+			assert.equal(harness.writes.filter((write) => write === "\x1b[<u").length, 1);
+			assert.equal(harness.terminal.kittyProtocolActive, false);
+
+			harness.cleanup();
+			assert.equal(harness.writes.filter((write) => write === "\x1b[<u").length, 1);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("keeps the new Kitty push when a device attributes reply from before a restart arrives", () => {
+		const harness = setupNegotiation();
+		try {
+			harness.terminal.stop();
+			(harness.terminal as unknown as { queryAndEnableKittyProtocol(): void }).queryAndEnableKittyProtocol();
+			const popsBeforeReplies = harness.writes.filter((write) => write === "\x1b[<u").length;
+
+			// The first start's DA arrives late, then the second start's Kitty reply and DA.
+			harness.send("\x1b[?62;4;52c");
+			assert.equal(harness.writes.filter((write) => write === "\x1b[<u").length, popsBeforeReplies);
+			harness.send("\x1b[?7u");
+			harness.send("\x1b[?62;4;52c");
+
+			assert.equal(harness.terminal.kittyProtocolActive, true);
+			assert.equal(harness.writes.filter((write) => write === "\x1b[<u").length, popsBeforeReplies);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
 	it("forwards device attributes replies that answer other queries", () => {
 		const harness = setupNegotiation();
 		try {
@@ -331,7 +367,7 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 					harness.send("\x1b[?62;4;52c");
 					harness.send("\x1b]7501;?\x1b\\");
 					harness.send("\x1b[?62;4;52c");
-					assert.equal(harness.writes.at(-1), working);
+					assert.equal(harness.writes.filter((write) => write.startsWith("\x1b]7501;state=")).at(-1), working);
 					assert.equal(harness.getInput(), undefined);
 				} finally {
 					harness.cleanup();

@@ -289,7 +289,8 @@ export class ProcessTerminal implements Terminal {
 	 * Kitty's progressive enhancement detection requires requesting the desired
 	 * flags before querying them. The trailing DA query is a sentinel supported by
 	 * terminals that do not know Kitty keyboard protocol; receiving DA before a
-	 * Kitty response enables modifyOtherKeys fallback without a startup timeout.
+	 * Kitty response pops the requested flags and enables modifyOtherKeys
+	 * fallback without a startup timeout.
 	 *
 	 * The requested flags are:
 	 * - 1 = disambiguate escape codes
@@ -322,7 +323,16 @@ export class ProcessTerminal implements Terminal {
 			this.pendingKeyboardProtocolDeviceAttributes -= 1;
 			// The last owed DA answers the latest query, which got no program status reply first. Earlier DA
 			// replies belong to queries from before a restart.
-			if (this.pendingKeyboardProtocolDeviceAttributes === 0) this.programStatusQueryPending = false;
+			if (this.pendingKeyboardProtocolDeviceAttributes === 0) {
+				this.programStatusQueryPending = false;
+				// No Kitty flags reply came first, so pop the unconfirmed push. Windows ConPTY forwards the push
+				// to the terminal but drops its reply; the terminal then sends Kitty-encoded keys that ConPTY
+				// drops too, so arrow keys never arrive.
+				if (!this._kittyProtocolActive && this.keyboardProtocolPushed) {
+					process.stdout.write("\x1b[<u");
+					this.keyboardProtocolPushed = false;
+				}
+			}
 		}
 		if (negotiationSequence.type === "kitty-flags") {
 			if (negotiationSequence.flags !== 0) {
